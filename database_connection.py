@@ -99,6 +99,7 @@ class DatabaseConnection:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 full_name TEXT NOT NULL,
                 birth_date TEXT NOT NULL,
+                gender TEXT,
                 phone TEXT,
                 email TEXT,
                 address TEXT,
@@ -433,22 +434,22 @@ class DatabaseConnection:
         query = "SELECT * FROM patients WHERE id = ?"
         return self.fetch_one(query, (patient_id,))
     
-    def add_patient(self, full_name, birth_date, phone=None, email=None, address=None):
+    def add_patient(self, full_name, birth_date, gender=None, phone=None, email=None, address=None):
         """Добавление нового пациента"""
         query = """
-        INSERT INTO patients (full_name, birth_date, phone, email, address) 
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO patients (full_name, birth_date, gender, phone, email, address) 
+        VALUES (?, ?, ?, ?, ?, ?)
         """
-        return self.execute_query(query, (full_name, birth_date, phone, email, address))
+        return self.execute_query(query, (full_name, birth_date, gender, phone, email, address))
     
-    def update_patient(self, patient_id, full_name, birth_date, phone=None, email=None, address=None):
+    def update_patient(self, patient_id, full_name, birth_date, gender=None, phone=None, email=None, address=None):
         """Обновление данных пациента"""
         query = """
         UPDATE patients 
-        SET full_name = ?, birth_date = ?, phone = ?, email = ?, address = ? 
+        SET full_name = ?, birth_date = ?, gender = ?, phone = ?, email = ?, address = ? 
         WHERE id = ?
         """
-        return self.execute_query(query, (full_name, birth_date, phone, email, address, patient_id))
+        return self.execute_query(query, (full_name, birth_date, gender, phone, email, address, patient_id))
     
     def delete_patient(self, patient_id):
         """Удаление пациента"""
@@ -581,6 +582,119 @@ class DatabaseConnection:
             ORDER BY p.full_name
             """
             return self.fetch_all(query)
+
+    def get_analysis_result_details(self, result_id):
+        """
+        Получение детальной информации о результате анализа
+        
+        :param result_id: ID результата анализа
+        :return: Словарь с детальной информацией о результате или None, если результат не найден
+        """
+        try:
+            # Получаем основную информацию о результате анализа
+            query = """
+            SELECT ar.id, ar.patient_id, ar.analysis_type_id, ar.lab_user_id, 
+                   ar.result_data, ar.result_date, ar.status,
+                   p.full_name as patient_name, p.birth_date,
+                   at.name as analysis_type_name, at.description as analysis_type_description,
+                   at.parameters as analysis_type_parameters,
+                   u.full_name as lab_technician_name
+            FROM analysis_results ar
+            JOIN patients p ON ar.patient_id = p.id
+            JOIN analysis_types at ON ar.analysis_type_id = at.id
+            JOIN users u ON ar.lab_user_id = u.id
+            WHERE ar.id = ?
+            """
+            result = self.fetch_one(query, (result_id,))
+            
+            if not result:
+                return None
+            
+            # Формируем структуру данных для ответа
+            result_details = {
+                'id': result['id'],
+                'date_taken': result['result_date'],
+                'status': result['status'],
+                'patient': {
+                    'id': result['patient_id'],
+                    'full_name': result['patient_name'],
+                    'birth_date': result['birth_date'],
+                    'gender': 'Не указан'  # Используем значение по умолчанию
+                },
+                'analysis_type': {
+                    'id': result['analysis_type_id'],
+                    'name': result['analysis_type_name'],
+                    'description': result['analysis_type_description']
+                },
+                'lab_technician': result['lab_technician_name']
+            }
+            
+            # Получаем и парсим данные результатов
+            result_data = result['result_data']
+            parameters = []
+            
+            try:
+                # Пробуем разобрать JSON
+                import json
+                result_data_dict = json.loads(result_data)
+                
+                # Получаем список параметров анализа
+                analysis_parameters = result['analysis_type_parameters'].split(',') if result['analysis_type_parameters'] else []
+                
+                # Нормальные значения для известных параметров
+                normal_values = {
+                    'Гемоглобин': {'min': 120, 'max': 160, 'unit': 'г/л'},
+                    'Эритроциты': {'min': 3.8, 'max': 5.5, 'unit': 'млн/мкл'},
+                    'Лейкоциты': {'min': 4.0, 'max': 9.0, 'unit': 'тыс/мкл'},
+                    'Тромбоциты': {'min': 180, 'max': 320, 'unit': 'тыс/мкл'},
+                    'СОЭ': {'min': 2, 'max': 15, 'unit': 'мм/ч'},
+                    'Глюкоза': {'min': 3.9, 'max': 6.1, 'unit': 'ммоль/л'},
+                    'Холестерин': {'min': 3.0, 'max': 5.2, 'unit': 'ммоль/л'},
+                    'Билирубин': {'min': 3.4, 'max': 17.1, 'unit': 'мкмоль/л'},
+                    'АЛТ': {'min': 5, 'max': 40, 'unit': 'ед/л'},
+                    'АСТ': {'min': 5, 'max': 40, 'unit': 'ед/л'},
+                    'Креатинин': {'min': 53, 'max': 106, 'unit': 'мкмоль/л'},
+                    'Мочевина': {'min': 2.5, 'max': 8.3, 'unit': 'ммоль/л'},
+                    'pH': {'min': 5.0, 'max': 7.0, 'unit': ''},
+                    'Белок': {'min': None, 'max': None, 'unit': ''},
+                    'Кетоновые тела': {'min': None, 'max': None, 'unit': ''}
+                }
+                
+                for param_name in analysis_parameters:
+                    param_value = result_data_dict.get(param_name, 'Нет данных')
+                    normal_vals = normal_values.get(param_name, {'min': None, 'max': None, 'unit': ''})
+                    
+                    # Определяем, в норме ли значение
+                    is_normal = None
+                    if normal_vals['min'] is not None and normal_vals['max'] is not None and isinstance(param_value, (int, float)):
+                        is_normal = normal_vals['min'] <= param_value <= normal_vals['max']
+                    
+                    parameters.append({
+                        'name': param_name,
+                        'value': param_value,
+                        'unit': normal_vals['unit'],
+                        'normal_min': normal_vals['min'],
+                        'normal_max': normal_vals['max'],
+                        'is_normal': is_normal
+                    })
+                
+            except (json.JSONDecodeError, AttributeError, TypeError) as e:
+                # Если не удалось разобрать JSON, добавляем результат как текст
+                parameters.append({
+                    'name': 'Результат',
+                    'value': result_data,
+                    'unit': '',
+                    'normal_min': None,
+                    'normal_max': None,
+                    'is_normal': None
+                })
+            
+            result_details['parameters'] = parameters
+            return result_details
+            
+        except Exception as e:
+            print(f"Ошибка при получении деталей результата анализа: {e}")
+            return None
 
 
 # Создание экземпляра для использования в других модулях

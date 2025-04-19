@@ -2,6 +2,7 @@ import os
 import docx
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
+from datetime import datetime
 
 class DocumentGenerator:
     def __init__(self):
@@ -228,6 +229,162 @@ class DocumentGenerator:
         
         # Имя файла
         filename = f"Карта_{patient_data['full_name']}.docx"
+        # Заменим недопустимые символы в имени файла
+        filename = filename.replace(':', '_').replace('/', '_').replace('\\', '_')
+        
+        # Путь к файлу
+        file_path = os.path.join(self.documents_path, filename)
+        
+        # Сохранить документ
+        doc.save(file_path)
+        
+        return file_path
+    
+    def generate_appointment_referral(self, patient_data, doctor_data, appointment_data, analysis_results=None):
+        """
+        Генерировать направление на прием к врачу в формате Word
+        
+        Args:
+            patient_data (dict): Данные о пациенте
+            doctor_data (dict): Данные о враче
+            appointment_data (dict): Данные о приеме
+            analysis_results (list, optional): Список анализов пациента
+        
+        Returns:
+            str: Путь к сгенерированному файлу
+        """
+        # Создать новый документ
+        doc = docx.Document()
+        
+        # Установить поля страницы
+        sections = doc.sections
+        for section in sections:
+            section.top_margin = Cm(2)
+            section.bottom_margin = Cm(2)
+            section.left_margin = Cm(3)
+            section.right_margin = Cm(2)
+        
+        # Добавить заголовок
+        header = doc.add_heading(f'НАПРАВЛЕНИЕ НА ПРИЕМ', level=1)
+        header_format = header.runs[0].font
+        header_format.size = Pt(16)
+        header_format.bold = True
+        header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        # Информация о дате
+        date_info = doc.add_paragraph()
+        date_info.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        current_date = datetime.now().strftime("%d.%m.%Y")
+        date_run = date_info.add_run(f"Дата выдачи: {current_date}")
+        date_run.font.size = Pt(10)
+        
+        # Информация о пациенте
+        doc.add_paragraph()
+        patient_title = doc.add_heading('Пациент:', level=2)
+        patient_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        patient_info = doc.add_paragraph()
+        patient_info.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        patient_run = patient_info.add_run(f"ФИО: {patient_data['full_name']}")
+        patient_run.font.size = Pt(12)
+        patient_run.font.bold = True
+        
+        patient_info.add_run(f"\nДата рождения: {patient_data['birth_date']}").font.size = Pt(12)
+        patient_info.add_run(f"\nПол: {patient_data['gender']}").font.size = Pt(12)
+        
+        if patient_data.get('phone_number'):
+            patient_info.add_run(f"\nТелефон: {patient_data['phone_number']}").font.size = Pt(12)
+        
+        # Информация о враче
+        doc.add_paragraph()
+        doctor_title = doc.add_heading('Врач:', level=2)
+        doctor_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        doctor_info = doc.add_paragraph()
+        doctor_info.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        doctor_run = doctor_info.add_run(f"ФИО: {doctor_data['full_name']}")
+        doctor_run.font.size = Pt(12)
+        doctor_run.font.bold = True
+        
+        doctor_info.add_run(f"\nСпециализация: {doctor_data.get('specialization', 'Не указана')}").font.size = Pt(12)
+        
+        # Информация о приеме
+        doc.add_paragraph()
+        appointment_title = doc.add_heading('Информация о приеме:', level=2)
+        appointment_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        appointment_info = doc.add_paragraph()
+        appointment_info.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        
+        # Разделим дату и время, если они в одной строке
+        appointment_datetime = appointment_data.get('appointment_date', '')
+        if ' ' in appointment_datetime:
+            date_part, time_part = appointment_datetime.split(' ', 1)
+        else:
+            date_part = appointment_datetime
+            time_part = ''
+        
+        appointment_info.add_run(f"Дата приема: {date_part}").font.size = Pt(12)
+        appointment_info.add_run(f"\nВремя приема: {time_part}").font.size = Pt(12)
+        
+        status = appointment_data.get('status', 'scheduled')
+        status_text = {
+            'scheduled': 'Запланирован',
+            'completed': 'Завершен',
+            'cancelled': 'Отменен'
+        }.get(status, status)
+        
+        appointment_info.add_run(f"\nСтатус: {status_text}").font.size = Pt(12)
+        
+        if appointment_data.get('notes'):
+            notes_run = appointment_info.add_run(f"\nПримечания: {appointment_data['notes']}")
+            notes_run.font.size = Pt(12)
+            notes_run.italic = True
+        
+        # Если есть результаты анализов, добавим их
+        if analysis_results:
+            doc.add_paragraph()
+            analysis_title = doc.add_heading('Результаты анализов:', level=2)
+            analysis_title.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            
+            # Таблица с анализами
+            table = doc.add_table(rows=1, cols=3)
+            table.style = 'Table Grid'
+            
+            # Заголовки таблицы
+            hdr_cells = table.rows[0].cells
+            hdr_cells[0].text = 'Дата'
+            hdr_cells[1].text = 'Тип анализа'
+            hdr_cells[2].text = 'Статус'
+            
+            # Сделать заголовки жирными
+            for cell in hdr_cells:
+                for paragraph in cell.paragraphs:
+                    for run in paragraph.runs:
+                        run.font.bold = True
+                        run.font.size = Pt(11)
+            
+            # Добавить данные в таблицу
+            for result in analysis_results:
+                row_cells = table.add_row().cells
+                row_cells[0].text = result['date_taken']
+                row_cells[1].text = result['analysis_type']
+                row_cells[2].text = result['status']
+        
+        # Добавить подпись
+        doc.add_paragraph()
+        signature = doc.add_paragraph()
+        signature.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        signature.add_run("Подпись врача: _______________________").font.size = Pt(12)
+        
+        # Добавить печать
+        signature.add_run("\n\nМ.П.").font.size = Pt(12)
+        
+        # Имя файла
+        appointment_date_formatted = date_part.replace('.', '_').replace('/', '_').replace('\\', '_')
+        filename = f"Направление_{patient_data['full_name']}_{appointment_date_formatted}.docx"
         # Заменим недопустимые символы в имени файла
         filename = filename.replace(':', '_').replace('/', '_').replace('\\', '_')
         
