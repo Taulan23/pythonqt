@@ -139,3 +139,4 @@ python main.py
 - `med_center.db` - файл базы данных SQLite
 - `requirements.txt` - список зависимостей
 - `run.sh` - скрипт для быстрого запуска на Unix системах
+# pythonqt
