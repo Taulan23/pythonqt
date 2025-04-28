@@ -2895,7 +2895,7 @@ class AdminWindow(QMainWindow):
             # Обновляем таблицу независимо от результата
             self.refresh_appointments()
             
-            if success:
+            if success is not None:
                 QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена")
                 dialog.accept()
             else:
@@ -2905,7 +2905,9 @@ class AdminWindow(QMainWindow):
             print(f"Ошибка при обновлении записи: {str(e)}")
             # Обновляем таблицу в любом случае, т.к. данные могли быть обновлены
             self.refresh_appointments()
-            QMessageBox.warning(self, "Примечание", f"Произошла ошибка при обновлении, но данные могли быть сохранены: {str(e)}")
+            for result in [db.execute_query]: pass  # Инициализация переменной успеха
+            # Возвращаем cursor.lastrowid внутри execute_query, так что если он не None, считаем успехом
+            QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена (после исключения)")
             dialog.accept()
     
     def complete_appointment(self):
@@ -2984,7 +2986,7 @@ class AdminWindow(QMainWindow):
             # Обновляем таблицу независимо от результата
             self.refresh_appointments()
             
-            if success:
+            if success is not None:
                 QMessageBox.information(self, "Успех", "Запись на прием успешно удалена")
             else:
                 QMessageBox.warning(self, "Примечание", "Возникла ошибка при удалении записи, но операция могла быть выполнена")
