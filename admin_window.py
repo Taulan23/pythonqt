@@ -24,6 +24,7 @@ import subprocess
 import platform
 import xlwt
 import ssl
+import report_generator
 
 from database_connection import db
 
@@ -1635,6 +1636,11 @@ class AnalysisResultsWidget(QWidget):
         export_excel_button.clicked.connect(self.export_to_excel)
         actions_layout.addWidget(export_excel_button)
         
+        # Кнопка экспорта всех результатов в Word
+        export_all_word_button = QPushButton("Экспорт всех в Word")
+        export_all_word_button.clicked.connect(self.export_all_to_word)
+        actions_layout.addWidget(export_all_word_button)
+        
         # Кнопка отправки отчета по email
         send_report_button = QPushButton("Отправить отчет")
         send_report_button.clicked.connect(self.send_report_by_email)
@@ -1825,7 +1831,7 @@ class AnalysisResultsWidget(QWidget):
             
             # Кнопка экспорта в Word
             word_button = QPushButton("Экспорт в Word")
-            word_button.clicked.connect(lambda: self.export_to_word(result_id=result_id, dialog=dialog))
+            word_button.clicked.connect(lambda: report_generator.export_analysis_to_word(result_id, dialog))
             buttons_layout.addWidget(word_button)
             
             # Кнопка отправки по email
@@ -1852,51 +1858,32 @@ class AnalysisResultsWidget(QWidget):
             sender = self.sender()
             result_id = sender.property("result_id")
         
-        # Загрузка деталей результата
-        result_details = db.get_analysis_result_details(result_id)
+        # Используем функцию из модуля report_generator
+        report_generator.export_analysis_to_word(result_id, dialog or self)
+    
+    def export_all_to_word(self):
+        """Экспорт всех результатов анализов в Word"""
+        # Получаем текущие фильтры из интерфейса
+        filters = {}
         
-        if result_details:
-            try:
-                # Генерируем документ
-                file_path = self.document_generator.generate_analysis_report(result_details)
-                
-                # Показываем сообщение об успехе
-                QMessageBox.information(
-                    dialog or self, 
-                    "Успех", 
-                    f"Отчет сохранен: {file_path}"
-                )
-                
-                # Предлагаем открыть документ
-                reply = QMessageBox.question(
-                    dialog or self, 
-                    "Открыть документ", 
-                    "Хотите открыть сгенерированный документ?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.Yes
-                )
-                
-                if reply == QMessageBox.Yes:
-                    # Открываем документ в соответствующей программе
-                    if platform.system() == 'Darwin':  # macOS
-                        subprocess.call(('open', file_path))
-                    elif platform.system() == 'Windows':  # Windows
-                        os.startfile(file_path)
-                    else:  # Linux
-                        subprocess.call(('xdg-open', file_path))
-            
-            except Exception as e:
-                QMessageBox.critical(
-                    dialog or self, 
-                    "Ошибка", 
-                    f"Не удалось создать документ: {str(e)}"
-                )
-        else:
-            QMessageBox.warning(
-                dialog or self, 
-                "Ошибка", 
-                "Не удалось загрузить результаты анализа"
-            )
+        # Получаем ID пациента, если выбран
+        if self.patient_combo.currentData():
+            filters['patient_id'] = self.patient_combo.currentData()
+        
+        # Получаем ID типа анализа, если выбран
+        if self.analysis_type_combo.currentData():
+            filters['analysis_type_id'] = self.analysis_type_combo.currentData()
+        
+        # Получаем даты из полей выбора даты
+        filters['from_date'] = self.date_from.date().toString("yyyy-MM-dd")
+        filters['to_date'] = self.date_to.date().toString("yyyy-MM-dd")
+        
+        # Получаем статус, если выбран
+        if self.status_combo.currentData():
+            filters['status'] = self.status_combo.currentData()
+        
+        # Используем функцию из модуля report_generator
+        report_generator.export_all_analyses_to_word(self, filters)
     
     def send_by_email(self, result_id=None, dialog=None):
         """Отправка результата анализа по email"""
