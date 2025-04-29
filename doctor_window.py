@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QComboBox, QPushBut
                                QVBoxLayout, QHBoxLayout, QMessageBox, QFormLayout, 
                                QTableWidget, QTableWidgetItem, QLineEdit, QDialog,
                                QTabWidget, QCalendarWidget, QDateEdit, QGroupBox,
-                               QScrollArea, QFrame)
+                               QScrollArea, QFrame, QHeaderView)
 from PySide6.QtCore import Qt, Signal, QDate
 from PySide6.QtGui import QFont, QIcon, QColor
 import sys
@@ -366,11 +366,12 @@ class DoctorWindow(QMainWindow):
         
         # Таблица с расписанием
         self.schedule_table = QTableWidget()
-        self.schedule_table.setColumnCount(5)
+        self.schedule_table.setColumnCount(6)
         self.schedule_table.setHorizontalHeaderLabels([
-            "Время", "Пациент", "Примечания", "Статус", "Действия"
+            "Дата", "Время", "Пациент", "Статус", "Примечания", "Действия"
         ])
-        self.schedule_table.horizontalHeader().setStretchLastSection(True)
+        self.schedule_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.schedule_table.setSortingEnabled(True)
         
         layout.addWidget(self.schedule_table)
         
@@ -420,11 +421,12 @@ class DoctorWindow(QMainWindow):
         
         # Таблица с результатами анализов
         self.analysis_table = QTableWidget()
-        self.analysis_table.setColumnCount(5)
+        self.analysis_table.setColumnCount(6)
         self.analysis_table.setHorizontalHeaderLabels([
-            "Пациент", "Тип анализа", "Дата", "Статус", "Действия"
+            "Дата", "Пациент", "Тип анализа", "Статус", "Лаборант", "Действия"
         ])
-        self.analysis_table.horizontalHeader().setStretchLastSection(True)
+        self.analysis_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.analysis_table.setSortingEnabled(True)
         
         layout.addWidget(self.analysis_table)
         
@@ -609,10 +611,14 @@ class DoctorWindow(QMainWindow):
                 status_item = QTableWidgetItem(status_text)
                 self.analysis_table.setItem(row, 3, status_item)
                 
+                # Лаборант
+                lab_technician_item = QTableWidgetItem(result['lab_technician_name'])
+                self.analysis_table.setItem(row, 4, lab_technician_item)
+                
                 # Кнопка действий
                 view_button = QPushButton("Просмотр")
                 view_button.clicked.connect(lambda checked, r=result: self.view_analysis_details(r))
-                self.analysis_table.setCellWidget(row, 4, view_button)
+                self.analysis_table.setCellWidget(row, 5, view_button)
         except Exception as e:
             print(f"Ошибка при загрузке анализов: {e}")
             QMessageBox.critical(self, "Ошибка", f"Не удалось загрузить результаты анализов: {str(e)}")

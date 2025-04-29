@@ -273,9 +273,11 @@ class LabTechnicianWindow(QMainWindow):
         self.history_table = QTableWidget()
         self.history_table.setColumnCount(5)
         self.history_table.setHorizontalHeaderLabels([
-            "Пациент", "Тип анализа", "Дата", "Статус", "Действия"
+            "Дата", "Пациент", "Тип анализа", "Статус", "Действия"
         ])
-        self.history_table.horizontalHeader().setStretchLastSection(True)
+        
+        # Включаем сортировку
+        self.history_table.setSortingEnabled(True)
         
         history_layout.addWidget(self.history_table)
         history_group.setLayout(history_layout)
@@ -298,8 +300,9 @@ class LabTechnicianWindow(QMainWindow):
         self.history_table.setRowCount(len(analysis_results))
         
         for row, result in enumerate(analysis_results):
-            self.history_table.setItem(row, 0, QTableWidgetItem(result['patient_name']))
-            self.history_table.setItem(row, 1, QTableWidgetItem(result['analysis_name']))
+            self.history_table.setItem(row, 0, QTableWidgetItem(result['result_date']))
+            self.history_table.setItem(row, 1, QTableWidgetItem(result['patient_name']))
+            self.history_table.setItem(row, 2, QTableWidgetItem(result['analysis_name']))
             
             # Корректная обработка даты (может быть строкой)
             result_date = result['result_date']
@@ -313,7 +316,7 @@ class LabTechnicianWindow(QMainWindow):
             else:
                 date_str = ""
                 
-            self.history_table.setItem(row, 2, QTableWidgetItem(date_str))
+            self.history_table.setItem(row, 3, QTableWidgetItem(date_str))
             
             status_item = QTableWidgetItem(result['status'])
             if result['status'] == 'completed':
@@ -323,11 +326,11 @@ class LabTechnicianWindow(QMainWindow):
             elif result['status'] == 'sent':
                 status_item.setText("Отправлен")
             
-            self.history_table.setItem(row, 3, status_item)
+            self.history_table.setItem(row, 4, status_item)
             
             view_button = QPushButton("Просмотр")
             view_button.clicked.connect(lambda checked, r=result: self.view_analysis_result(r))
-            self.history_table.setCellWidget(row, 4, view_button)
+            self.history_table.setCellWidget(row, 5, view_button)
     
     def start_analysis_entry(self):
         """Начало ввода результатов анализа"""

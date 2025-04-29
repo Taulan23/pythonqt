@@ -1155,6 +1155,7 @@ class PatientListWidget(QWidget):
             "ID", "ФИО", "Дата рождения", "Пол", "Телефон", "Email", "Действия"
         ])
         self.patients_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.patients_table.setSortingEnabled(True)
         
         layout.addWidget(self.patients_table)
         
@@ -1622,6 +1623,7 @@ class AnalysisResultsWidget(QWidget):
             "Дата", "Пациент", "Тип анализа", "Статус", "Лаборант", "Документы", "Email"
         ])
         self.results_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.results_table.setSortingEnabled(True)
         
         layout.addWidget(self.results_table)
         
@@ -2414,6 +2416,7 @@ class AdminWindow(QMainWindow):
             "Дата и время", "Пациент", "Врач", "Статус", "Примечания", "Действия", ""
         ])
         self.appointments_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.appointments_table.setSortingEnabled(True)
         
         layout.addWidget(self.appointments_table)
         

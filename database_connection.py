@@ -350,7 +350,12 @@ class DatabaseConnection:
             print(f"Параметры: {params}")
             cursor.execute(query, params or ())
             self._connection.commit()
-            return cursor.lastrowid
+            # Для INSERT возвращаем lastrowid, для UPDATE/DELETE возвращаем rowcount
+            cmd = query.strip().split()[0].lower()
+            if cmd == 'insert':
+                return cursor.lastrowid
+            else:
+                return cursor.rowcount
         except sqlite3.Error as e:
             self._connection.rollback()
             print(f"Ошибка выполнения запроса: {e}")
