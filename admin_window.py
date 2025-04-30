@@ -1878,10 +1878,6 @@ class AnalysisResultsWidget(QWidget):
         filters['from_date'] = self.date_from.date().toString("yyyy-MM-dd")
         filters['to_date'] = self.date_to.date().toString("yyyy-MM-dd")
         
-        # Получаем статус, если выбран
-        if self.status_combo.currentData():
-            filters['status'] = self.status_combo.currentData()
-        
         # Используем функцию из модуля report_generator
         report_generator.export_all_analyses_to_word(self, filters)
     
