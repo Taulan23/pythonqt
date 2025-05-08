@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QLabel, QComboBox, QPushBut
                                QHeaderView, QStackedWidget, QSplitter, QTimeEdit,
                                QFileDialog)
 from PySide6.QtCore import Qt, Signal, QDate, QSize, QTimer, QTime
-from PySide6.QtGui import QFont, QIcon, QColor, QPixmap
+from PySide6.QtGui import QFont, QIcon, QColor, QPixmap, QPainter, QPen, QBrush, QPainterPath
 from datetime import datetime, timedelta
 import sys
 import json
@@ -1677,7 +1677,7 @@ class AnalysisResultsWidget(QWidget):
         
         # Формирование и выполнение запроса
         query = f"""
-            SELECT ar.id, p.full_name as patient_name, p.birth_date, at.name as analysis_type, 
+            SELECT ar.id as id, p.full_name as patient_name, p.birth_date, at.name as analysis_type, 
                    ar.result_date, u.full_name as lab_technician, ar.status
             FROM analysis_results ar
             JOIN patients p ON ar.patient_id = p.id
@@ -1688,12 +1688,33 @@ class AnalysisResultsWidget(QWidget):
         """
         results = db.fetch_all(query, params)
         
+        # Отладочный вывод результатов запроса
+        print(f"Получено {len(results)} результатов анализов")
+        
         # Обновление таблицы
         self.results_table.setRowCount(len(results))
         
         for row, result in enumerate(results):
+            # Проверяем, содержит ли результат ID
+            if 'id' not in result:
+                print(f"ОШИБКА: Запись не содержит ID для строки {row}")
+                continue
+            
             # Распаковка данных
             result_id = result.get('id')
+            
+            # Проверка, что ID существует и является числом
+            if result_id is None:
+                print(f"ID результата отсутствует в данных")
+                continue
+            
+            # Гарантируем, что ID - целое число
+            try:
+                result_id = int(result_id)
+            except (ValueError, TypeError):
+                print(f"Ошибка преобразования ID {result_id} в число")
+                continue
+            
             patient_name = result.get('patient_name', '')
             birth_date = result.get('birth_date', '')
             analysis_type = result.get('analysis_type', '')
@@ -1717,12 +1738,7 @@ class AnalysisResultsWidget(QWidget):
             view_button.setProperty("result_id", result_id)
             view_button.clicked.connect(self.view_analysis_result)
             
-            export_button = QPushButton("Word")
-            export_button.setProperty("result_id", result_id)
-            export_button.clicked.connect(self.export_to_word)
-            
             doc_layout.addWidget(view_button)
-            doc_layout.addWidget(export_button)
             
             self.results_table.setCellWidget(row, 5, doc_widget)
             
@@ -1758,6 +1774,26 @@ class AnalysisResultsWidget(QWidget):
         # Получение ID результата
         sender = self.sender()
         result_id = sender.property("result_id")
+        
+        # Проверяем, что ID является корректным
+        try:
+            result_id = int(result_id) if result_id is not None else 0
+            if result_id <= 0:
+                error_dialog = ErrorDialog(
+                    self,
+                    "Не удалось загрузить результат анализа.",
+                    "Ошибка"
+                )
+                error_dialog.exec()
+                return
+        except (ValueError, TypeError):
+            error_dialog = ErrorDialog(
+                self,
+                "Ошибка при обработке данных анализа.",
+                "Ошибка"
+            )
+            error_dialog.exec()
+            return
         
         # Загрузка деталей результата
         result_details = db.get_analysis_result_details(result_id)
@@ -1849,7 +1885,12 @@ class AnalysisResultsWidget(QWidget):
             # Показываем диалог
             dialog.exec()
         else:
-            QMessageBox.warning(self, "Ошибка", "Не удалось загрузить результаты анализа")
+            error_dialog = ErrorDialog(
+                self,
+                "Не удалось загрузить результаты анализа.",
+                "Ошибка"
+            )
+            error_dialog.exec()
     
     def export_to_word(self, result_id=None, dialog=None):
         """Экспорт результата анализа в Word"""
@@ -1857,7 +1898,50 @@ class AnalysisResultsWidget(QWidget):
         if result_id is None:
             sender = self.sender()
             result_id = sender.property("result_id")
+            print(f"Получен ID из кнопки: {result_id}, тип: {type(result_id)}")
         
+        # Проверка, что ID является числом и больше 0
+        try:
+            result_id = int(result_id) if result_id is not None else 0
+            print(f"Преобразован ID в число: {result_id}")
+            if result_id <= 0:
+                print(f"Некорректный ID: {result_id} (должен быть > 0)")
+                # Используем новый класс диалога вместо QMessageBox
+                error_dialog = ErrorDialog(
+                    dialog or self,
+                    "Ошибка при загрузке результата анализа.",
+                    "Ошибка"
+                )
+                error_dialog.exec()
+                return
+                
+            # Дополнительная проверка существования записи
+            check_query = "SELECT id FROM analysis_results WHERE id = ?"
+            print(f"Проверка существования записи: {check_query} с ID={result_id}")
+            result_exists = db.fetch_one(check_query, (result_id,))
+            
+            if not result_exists:
+                print(f"Результат с ID {result_id} не найден в БД")
+                error_dialog = ErrorDialog(
+                    dialog or self,
+                    f"Результат анализа не найден в базе данных",
+                    "Ошибка"
+                )
+                error_dialog.exec()
+                return
+                
+            print(f"Результат существует: {result_exists}")
+            
+        except (ValueError, TypeError) as e:
+            print(f"Ошибка при преобразовании ID: {e}")
+            error_dialog = ErrorDialog(
+                dialog or self,
+                "Ошибка при обработке данных анализа",
+                "Ошибка"
+            )
+            error_dialog.exec()
+            return
+            
         # Используем функцию из модуля report_generator
         report_generator.export_analysis_to_word(result_id, dialog or self)
     
@@ -1888,15 +1972,36 @@ class AnalysisResultsWidget(QWidget):
             sender = self.sender()
             result_id = sender.property("result_id")
         
+        # Проверяем, что ID является корректным
+        try:
+            result_id = int(result_id) if result_id is not None else 0
+            if result_id <= 0:
+                error_dialog = ErrorDialog(
+                    dialog or self,
+                    "Не удалось определить результат анализа для отправки.",
+                    "Ошибка"
+                )
+                error_dialog.exec()
+                return
+        except (ValueError, TypeError):
+            error_dialog = ErrorDialog(
+                dialog or self,
+                "Ошибка при обработке данных анализа.",
+                "Ошибка"
+            )
+            error_dialog.exec()
+            return
+            
         # Загрузка деталей результата
         result_details = db.get_analysis_result_details(result_id)
         
         if not result_details:
-            QMessageBox.warning(
-                dialog or self, 
-                "Ошибка", 
-                "Не удалось загрузить результаты анализа"
+            error_dialog = ErrorDialog(
+                dialog or self,
+                "Не удалось загрузить результаты анализа.",
+                "Ошибка"
             )
+            error_dialog.exec()
             return
         
         # Получение email пациента
@@ -2114,6 +2219,46 @@ class AnalysisResultsWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(dialog, "Ошибка", f"Ошибка при отправке отчета: {str(e)}")
     
+    def update_appointment(self, dialog, appointment_id, patient_id, doctor_id, appointment_date, appointment_time, status, notes):
+        """Обновление данных записи на прием"""
+        if not patient_id:
+            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать пациента")
+            return
+        
+        if not doctor_id:
+            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать врача")
+            return
+        
+        # Формируем полную дату со временем
+        datetime_str = f"{appointment_date} {appointment_time}"
+        
+        try:
+            # Обновляем запись в базе данных
+            success = db.execute_query(
+                """UPDATE appointments 
+                   SET doctor_id = ?, patient_id = ?, appointment_date = ?, status = ?, notes = ? 
+                   WHERE id = ?""",
+                (doctor_id, patient_id, datetime_str, status, notes, appointment_id)
+            )
+            
+            # Обновляем таблицу независимо от результата
+            self.refresh_appointments()
+            
+            if success is not None:
+                QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена")
+                dialog.accept()
+            else:
+                QMessageBox.warning(self, "Примечание", "Возникла ошибка при обновлении записи, но данные могли быть сохранены")
+        
+        except Exception as e:
+            print(f"Ошибка при обновлении записи: {str(e)}")
+            # Обновляем таблицу в любом случае, т.к. данные могли быть обновлены
+            self.refresh_appointments()
+            for result in [db.execute_query]: pass  # Инициализация переменной успеха
+            # Возвращаем cursor.lastrowid внутри execute_query, так что если он не None, считаем успехом
+            QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена (после исключения)")
+            dialog.accept()
+    
     def export_to_excel(self, return_path=False):
         """
         Экспорт результатов анализов в Excel
@@ -2285,7 +2430,7 @@ class AdminWindow(QMainWindow):
         self.tab_widget.addTab(self.statistics_tab, "Статистика")
         
         main_layout.addWidget(self.tab_widget)
-    
+        
     def create_appointments_tab(self):
         """Создание вкладки для работы с записями на прием"""
         appointments_tab = QWidget()
@@ -2855,47 +3000,7 @@ class AdminWindow(QMainWindow):
         
         # Показываем диалог
         dialog.exec()
-    
-    def update_appointment(self, dialog, appointment_id, patient_id, doctor_id, appointment_date, appointment_time, status, notes):
-        """Обновление данных записи на прием"""
-        if not patient_id:
-            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать пациента")
-            return
         
-        if not doctor_id:
-            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать врача")
-            return
-        
-        # Формируем полную дату со временем
-        datetime_str = f"{appointment_date} {appointment_time}"
-        
-        try:
-            # Обновляем запись в базе данных
-            success = db.execute_query(
-                """UPDATE appointments 
-                   SET doctor_id = ?, patient_id = ?, appointment_date = ?, status = ?, notes = ? 
-                   WHERE id = ?""",
-                (doctor_id, patient_id, datetime_str, status, notes, appointment_id)
-            )
-            
-            # Обновляем таблицу независимо от результата
-            self.refresh_appointments()
-            
-            if success is not None:
-                QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена")
-                dialog.accept()
-            else:
-                QMessageBox.warning(self, "Примечание", "Возникла ошибка при обновлении записи, но данные могли быть сохранены")
-        
-        except Exception as e:
-            print(f"Ошибка при обновлении записи: {str(e)}")
-            # Обновляем таблицу в любом случае, т.к. данные могли быть обновлены
-            self.refresh_appointments()
-            for result in [db.execute_query]: pass  # Инициализация переменной успеха
-            # Возвращаем cursor.lastrowid внутри execute_query, так что если он не None, считаем успехом
-            QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена (после исключения)")
-            dialog.accept()
-    
     def complete_appointment(self):
         """Отметить запись на прием как завершенную"""
         # Получаем ID записи
@@ -2997,6 +3102,115 @@ class AdminWindow(QMainWindow):
             self.logout_signal.emit()
 
 
+class ErrorDialog(QDialog):
+    """Диалог для отображения ошибки с изображением ракеты"""
+    
+    def __init__(self, parent=None, message="Ошибка", title="Ошибка"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setFixedSize(320, 200)
+        self.setWindowFlags(Qt.Dialog | Qt.WindowTitleHint | Qt.CustomizeWindowHint)
+        
+        # Создание макета диалога
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(20, 10, 20, 10)
+        
+        # Точки навигации
+        dots_layout = QHBoxLayout()
+        dots_layout.setAlignment(Qt.AlignCenter)
+        
+        # Создаем 3 точки, первая активная (красная)
+        for i in range(3):
+            dot = QLabel()
+            dot.setFixedSize(10, 10)
+            dot.setStyleSheet(f"background-color: {'#e74c3c' if i == 0 else '#cccccc'}; border-radius: 5px;")
+            dots_layout.addWidget(dot)
+        
+        layout.addLayout(dots_layout)
+        
+        # Создание изображения ракеты
+        rocket_label = QLabel()
+        rocket_pixmap = QPixmap(30, 70)  # Создаем пустое изображение 
+        rocket_pixmap.fill(Qt.transparent)  # Заполняем его прозрачным цветом
+        
+        # Рисуем ракету
+        painter = QPainter(rocket_pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # Корпус ракеты (серый)
+        painter.setPen(QPen(QColor(180, 180, 180), 1))
+        painter.setBrush(QBrush(QColor(200, 200, 200)))
+        painter.drawEllipse(10, 5, 10, 15)  # верхушка
+        painter.drawRect(10, 20, 10, 30)    # корпус
+        
+        # Огонь (оранжевый)
+        flame_path = QPainterPath()
+        flame_path.moveTo(15, 50)   # середина нижней части
+        flame_path.lineTo(8, 62)    # левый край пламени
+        flame_path.lineTo(22, 62)   # правый край пламени
+        flame_path.lineTo(15, 50)   # обратно к началу
+        
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QColor(255, 165, 0))  # оранжевый
+        painter.drawPath(flame_path)
+        
+        # Иллюминаторы (голубые)
+        painter.setPen(QPen(Qt.blue, 1))
+        painter.setBrush(QBrush(QColor(173, 216, 230)))  # светло-голубой
+        painter.drawEllipse(12, 25, 6, 6)
+        painter.drawEllipse(12, 38, 6, 6)
+        
+        painter.end()
+        
+        # Устанавливаем изображение в метку
+        rocket_label.setPixmap(rocket_pixmap)
+        rocket_label.setAlignment(Qt.AlignCenter)
+        layout.addWidget(rocket_label)
+        
+        # Сообщение об ошибке
+        message_label = QLabel(message)
+        message_label.setAlignment(Qt.AlignCenter)
+        font = message_label.font()
+        font.setPointSize(10)
+        message_label.setFont(font)
+        layout.addWidget(message_label)
+        
+        # Кнопка OK
+        ok_button = QPushButton("OK")
+        ok_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                min-width: 80px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #0D47A1;
+            }
+        """)
+        ok_button.clicked.connect(self.accept)
+        
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        button_layout.addWidget(ok_button)
+        button_layout.addStretch()
+        
+        layout.addLayout(button_layout)
+        
+        # Добавляем небольшой отступ внизу
+        layout.addSpacing(10)
+
+    def closeEvent(self, event):
+        # Переопределяем метод закрытия для предотвращения возникновения ошибок
+        self.accept()
+        event.accept()
+
+
 if __name__ == "__main__":
     from PySide6.QtWidgets import QApplication
     
@@ -3016,4 +3230,4 @@ if __name__ == "__main__":
     window = AdminWindow(test_user)
     window.show()
     
-    sys.exit(app.exec()) 
+    sys.exit(app.exec())
