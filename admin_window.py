@@ -1659,9 +1659,12 @@ class AnalysisResultsWidget(QWidget):
         from_date = self.date_from.date().toString("yyyy-MM-dd")
         to_date = self.date_to.date().toString("yyyy-MM-dd")
         
+        # Отладочная информация
+        print(f"Применяем фильтры: пациент={patient_id}, тип анализа={analysis_type_id}, даты с {from_date} по {to_date}")
+        
         # Запрос к базе данных
         # Составление условий запроса
-        conditions = ["1=1"]  # Всегда истинное условие для удобства добавления других через AND
+        conditions = []
         params = []
         
         if patient_id:
@@ -1672,10 +1675,16 @@ class AnalysisResultsWidget(QWidget):
             conditions.append("ar.analysis_type_id = ?")
             params.append(analysis_type_id)
         
-        conditions.append("date(ar.result_date) BETWEEN ? AND ?")
-        params.extend([from_date, to_date])
+        # Корректировка запроса для фильтрации по дате
+        conditions.append("date(ar.result_date) >= ?")
+        params.append(from_date)
+        
+        conditions.append("date(ar.result_date) <= ?")
+        params.append(to_date)
         
         # Формирование и выполнение запроса
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        
         query = f"""
             SELECT ar.id as id, p.full_name as patient_name, p.birth_date, at.name as analysis_type, 
                    ar.result_date, u.full_name as lab_technician, ar.status
@@ -1683,13 +1692,19 @@ class AnalysisResultsWidget(QWidget):
             JOIN patients p ON ar.patient_id = p.id
             JOIN analysis_types at ON ar.analysis_type_id = at.id
             JOIN users u ON ar.lab_user_id = u.id
-            WHERE {' AND '.join(conditions)}
+            WHERE {where_clause}
             ORDER BY ar.result_date DESC
         """
-        results = db.fetch_all(query, params)
+        
+        print(f"SQL запрос: {query}")
+        print(f"Параметры: {params}")
+        
+        results = db.fetch_all(query, tuple(params))
         
         # Отладочный вывод результатов запроса
         print(f"Получено {len(results)} результатов анализов")
+        if len(results) > 0:
+            print(f"Первый результат: {results[0]}")
         
         # Обновление таблицы
         self.results_table.setRowCount(len(results))
@@ -1722,8 +1737,21 @@ class AnalysisResultsWidget(QWidget):
             lab_technician = result.get('lab_technician', '')
             status = result.get('status', '')
             
+            # Форматирование даты для отображения
+            try:
+                # Обрабатываем разные форматы даты
+                if ' ' in result_date:  # Если есть время в формате
+                    date_obj = datetime.strptime(result_date, "%Y-%m-%d %H:%M:%S")
+                    formatted_date = date_obj.strftime("%d.%m.%Y %H:%M")
+                else:
+                    date_obj = datetime.strptime(result_date, "%Y-%m-%d")
+                    formatted_date = date_obj.strftime("%d.%m.%Y")
+            except Exception as e:
+                print(f"Ошибка форматирования даты {result_date}: {str(e)}")
+                formatted_date = result_date
+            
             # Установка данных в ячейки таблицы
-            self.results_table.setItem(row, 0, QTableWidgetItem(result_date))
+            self.results_table.setItem(row, 0, QTableWidgetItem(formatted_date))
             self.results_table.setItem(row, 1, QTableWidgetItem(f"{patient_name} ({birth_date})"))
             self.results_table.setItem(row, 2, QTableWidgetItem(analysis_type))
             self.results_table.setItem(row, 3, QTableWidgetItem(self.translate_status(status)))
@@ -1738,7 +1766,12 @@ class AnalysisResultsWidget(QWidget):
             view_button.setProperty("result_id", result_id)
             view_button.clicked.connect(self.view_analysis_result)
             
+            export_button = QPushButton("Word")
+            export_button.setProperty("result_id", result_id)
+            export_button.clicked.connect(self.export_to_word)
+            
             doc_layout.addWidget(view_button)
+            doc_layout.addWidget(export_button)
             
             self.results_table.setCellWidget(row, 5, doc_widget)
             
@@ -2254,10 +2287,46 @@ class AnalysisResultsWidget(QWidget):
             print(f"Ошибка при обновлении записи: {str(e)}")
             # Обновляем таблицу в любом случае, т.к. данные могли быть обновлены
             self.refresh_appointments()
-            for result in [db.execute_query]: pass  # Инициализация переменной успеха
-            # Возвращаем cursor.lastrowid внутри execute_query, так что если он не None, считаем успехом
-            QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена (после исключения)")
-            dialog.accept()
+            QMessageBox.warning(self, "Примечание", f"Произошла ошибка при обновлении записи: {str(e)}")
+    
+    def delete_appointment(self):
+        """Удаление записи на прием"""
+        # Получаем ID записи
+        sender = self.sender()
+        appointment_id = sender.property("appointment_id")
+        
+        # Запрашиваем подтверждение
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            "Вы уверены, что хотите удалить эту запись на прием?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        try:
+            # Удаляем запись
+            success = db.execute_query(
+                "DELETE FROM appointments WHERE id = ?",
+                (appointment_id,)
+            )
+            
+            # Обновляем таблицу независимо от результата
+            self.refresh_appointments()
+            
+            if success is not None:
+                QMessageBox.information(self, "Успех", "Запись на прием успешно удалена")
+            else:
+                QMessageBox.warning(self, "Примечание", "Возникла ошибка при удалении записи, но операция могла быть выполнена")
+        
+        except Exception as e:
+            print(f"Ошибка при удалении записи: {str(e)}")
+            # Обновляем таблицу в любом случае
+            self.refresh_appointments()
+            QMessageBox.warning(self, "Примечание", f"Произошла ошибка при удалении, но операция могла быть выполнена: {str(e)}")
     
     def export_to_excel(self, return_path=False):
         """
@@ -2591,7 +2660,7 @@ class AdminWindow(QMainWindow):
             JOIN doctors d ON a.doctor_id = d.id
             JOIN users u ON d.user_id = u.id
             WHERE {' AND '.join(conditions)}
-            ORDER BY a.appointment_date
+             ORDER BY a.appointment_date DESC
         """
         appointments = db.fetch_all(query, params)
         
@@ -3087,6 +3156,43 @@ class AdminWindow(QMainWindow):
             # Обновляем таблицу в любом случае
             self.refresh_appointments()
             QMessageBox.warning(self, "Примечание", f"Произошла ошибка при удалении, но операция могла быть выполнена: {str(e)}")
+    
+    def update_appointment(self, dialog, appointment_id, patient_id, doctor_id, appointment_date, appointment_time, status, notes):
+        """Обновление данных записи на прием"""
+        if not patient_id:
+            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать пациента")
+            return
+        
+        if not doctor_id:
+            QMessageBox.warning(self, "Ошибка", "Необходимо выбрать врача")
+            return
+        
+        # Формируем полную дату со временем
+        datetime_str = f"{appointment_date} {appointment_time}"
+        
+        try:
+            # Обновляем запись в базе данных
+            success = db.execute_query(
+                """UPDATE appointments 
+                   SET doctor_id = ?, patient_id = ?, appointment_date = ?, status = ?, notes = ? 
+                   WHERE id = ?""",
+                (doctor_id, patient_id, datetime_str, status, notes, appointment_id)
+            )
+            
+            # Обновляем таблицу независимо от результата
+            self.refresh_appointments()
+            
+            if success is not None:
+                QMessageBox.information(self, "Успех", "Запись на прием успешно обновлена")
+                dialog.accept()
+            else:
+                QMessageBox.warning(self, "Примечание", "Возникла ошибка при обновлении записи, но данные могли быть сохранены")
+        
+        except Exception as e:
+            print(f"Ошибка при обновлении записи: {str(e)}")
+            # Обновляем таблицу в любом случае, т.к. данные могли быть обновлены
+            self.refresh_appointments()
+            QMessageBox.warning(self, "Примечание", f"Произошла ошибка при обновлении записи: {str(e)}")
     
     def logout(self):
         """Выход из системы"""

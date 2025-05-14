@@ -19,7 +19,7 @@ def export_analysis_to_word(result_id, parent_widget):
     query = """
         SELECT ar.id, ar.result_date as date, p.full_name as patient_name, p.birth_date, 
                p.gender, p.phone, at.name as analysis_type, ar.result_data, 
-               ar.status, u.full_name as lab_technician
+               ar.status, u.full_name as lab_technician, at.parameters
         FROM analysis_results ar
         JOIN patients p ON ar.patient_id = p.id
         JOIN analysis_types at ON ar.analysis_type_id = at.id
@@ -57,8 +57,8 @@ def export_analysis_to_word(result_id, parent_widget):
     cells = [
         ('ФИО пациента:', result['patient_name']),
         ('Дата рождения:', result['birth_date']),
-        ('Пол:', result['gender']),
-        ('Телефон:', result['phone']),
+        ('Пол:', result['gender'] or 'Не указан'),
+        ('Телефон:', result['phone'] or 'Не указан'),
         ('Дата анализа:', result['date'])
     ]
     
@@ -70,25 +70,42 @@ def export_analysis_to_word(result_id, parent_widget):
     doc.add_heading(f'Анализ: {result["analysis_type"]}', level=2)
     
     # Данные результатов анализа
-    result_data = json.loads(result['result_data']) if result['result_data'] else {}
+    try:
+        result_data = json.loads(result['result_data']) if result['result_data'] else {}
+    except json.JSONDecodeError:
+        result_data = {}
+        doc.add_paragraph(f'Результат (текстовый формат): {result["result_data"]}')
     
     if result_data:
-        results_table = doc.add_table(rows=len(result_data) + 1, cols=3)
+        # Получаем список параметров анализа
+        parameters = result["parameters"].split(',') if result.get("parameters") else list(result_data.keys())
+        
+        results_table = doc.add_table(rows=1, cols=3)
         results_table.style = 'Table Grid'
         
         # Заголовки таблицы
-        headers = ['Параметр', 'Значение', 'Нормальные значения']
-        for i, header in enumerate(headers):
-            results_table.cell(0, i).text = header
+        header_cells = results_table.rows[0].cells
+        header_cells[0].text = 'Параметр'
+        header_cells[1].text = 'Значение'
+        header_cells[2].text = 'Нормальные значения'
+        
+        # Делаем заголовки жирными
+        for cell in header_cells:
+            for paragraph in cell.paragraphs:
+                for run in paragraph.runs:
+                    run.bold = True
         
         # Заполняем таблицу результатами
-        for i, (param, value) in enumerate(result_data.items(), 1):
-            results_table.cell(i, 0).text = param
-            results_table.cell(i, 1).text = str(value)
-            
-            # Получаем нормальные значения для параметра
-            normal_values = get_normal_values(param)
-            results_table.cell(i, 2).text = normal_values
+        for param in parameters:
+            param = param.strip()
+            if param in result_data:
+                row_cells = results_table.add_row().cells
+                row_cells[0].text = param
+                row_cells[1].text = str(result_data[param])
+                
+                # Получаем нормальные значения для параметра
+                normal_values = get_normal_values(param)
+                row_cells[2].text = normal_values
     else:
         doc.add_paragraph('Нет данных о результатах анализа.')
     
@@ -127,7 +144,7 @@ def export_all_analyses_to_word(parent_widget, filters=None):
     query = """
         SELECT ar.id, ar.result_date as date, p.full_name as patient_name, p.birth_date, 
                p.gender, p.phone, at.name as analysis_type, ar.result_data, 
-               ar.status, u.full_name as lab_technician
+               ar.status, u.full_name as lab_technician, at.parameters
         FROM analysis_results ar
         JOIN patients p ON ar.patient_id = p.id
         JOIN analysis_types at ON ar.analysis_type_id = at.id
@@ -148,16 +165,19 @@ def export_all_analyses_to_word(parent_widget, filters=None):
             params.append(filters['analysis_type_id'])
         
         if filters.get('from_date'):
-            query += " AND ar.result_date >= ?"
+            query += " AND date(ar.result_date) >= ?"
             params.append(filters['from_date'])
         
         if filters.get('to_date'):
-            query += " AND ar.result_date <= ?"
+            query += " AND date(ar.result_date) <= ?"
             params.append(filters['to_date'])
         
         if filters.get('status'):
             query += " AND ar.status = ?"
             params.append(filters['status'])
+    
+    # Сортировка по дате и имени пациента
+    query += " ORDER BY ar.result_date DESC, p.full_name"
     
     # Получаем результаты
     results = db.fetch_all(query, tuple(params))
@@ -190,61 +210,90 @@ def export_all_analyses_to_word(parent_widget, filters=None):
     
     # Проходим по каждому результату
     for i, result in enumerate(results, 1):
+        # Добавляем разрыв страницы после первого результата
+        if i > 1:
+            doc.add_page_break()
+            
         doc.add_heading(f'{i}. {result["analysis_type"]} - {result["patient_name"]}', level=2)
         
         # Информация о пациенте
         patient_info = doc.add_paragraph()
         patient_info.add_run('Пациент: ').bold = True
-        patient_info.add_run(f'{result["patient_name"]}, {result["birth_date"]}, {result["gender"]}, тел: {result["phone"]}')
+        patient_info.add_run(f'{result["patient_name"]}')
         
-        date_info = doc.add_paragraph()
-        date_info.add_run('Дата анализа: ').bold = True
-        date_info.add_run(result['date'])
+        patient_info = doc.add_paragraph()
+        patient_info.add_run('Дата рождения: ').bold = True
+        patient_info.add_run(f'{result["birth_date"]}')
+        
+        patient_info = doc.add_paragraph()
+        patient_info.add_run('Пол: ').bold = True
+        patient_info.add_run(f'{result["gender"] or "Не указан"}')
+        
+        patient_info = doc.add_paragraph()
+        patient_info.add_run('Телефон: ').bold = True
+        patient_info.add_run(f'{result["phone"] or "Не указан"}')
+        
+        # Добавляем информацию о дате анализа и статусе
+        analysis_info = doc.add_paragraph()
+        analysis_info.add_run('Дата анализа: ').bold = True
+        analysis_info.add_run(f'{result["date"]}')
         
         status_info = doc.add_paragraph()
         status_info.add_run('Статус: ').bold = True
-        status_info.add_run(result['status'])
+        status_info.add_run(f'{translate_status(result["status"])}')
         
-        lab_tech_info = doc.add_paragraph()
-        lab_tech_info.add_run('Лаборант: ').bold = True
-        lab_tech_info.add_run(result['lab_technician'])
+        # Добавляем результаты анализа в таблицу
+        doc.add_heading('Результаты', level=3)
         
-        # Данные результатов анализа
-        result_data = json.loads(result['result_data']) if result['result_data'] else {}
-        
-        if result_data:
-            doc.add_heading('Результаты анализа:', level=3)
-            results_table = doc.add_table(rows=len(result_data) + 1, cols=3)
-            results_table.style = 'Table Grid'
+        try:
+            # Пытаемся разобрать JSON с результатами
+            result_data = json.loads(result["result_data"]) if result["result_data"] else {}
             
-            # Заголовки таблицы
-            headers = ['Параметр', 'Значение', 'Нормальные значения']
-            for j, header in enumerate(headers):
-                results_table.cell(0, j).text = header
-            
-            # Заполняем таблицу результатами
-            for j, (param, value) in enumerate(result_data.items(), 1):
-                results_table.cell(j, 0).text = param
-                results_table.cell(j, 1).text = str(value)
+            if result_data:
+                # Получаем список параметров анализа
+                parameters = result["parameters"].split(',') if result.get("parameters") else list(result_data.keys())
                 
-                # Получаем нормальные значения для параметра
-                normal_values = get_normal_values(param)
-                results_table.cell(j, 2).text = normal_values
-        else:
-            doc.add_paragraph('Нет данных о результатах анализа.')
+                # Создаем таблицу для результатов
+                results_table = doc.add_table(rows=1, cols=3)
+                results_table.style = 'Table Grid'
+                
+                # Заголовки таблицы
+                header_cells = results_table.rows[0].cells
+                header_cells[0].text = 'Параметр'
+                header_cells[1].text = 'Значение'
+                header_cells[2].text = 'Нормальные значения'
+                
+                # Делаем заголовки жирными
+                for cell in header_cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.bold = True
+                
+                # Добавляем данные в таблицу
+                for param in parameters:
+                    param = param.strip()
+                    if param in result_data:
+                        row_cells = results_table.add_row().cells
+                        row_cells[0].text = param
+                        row_cells[1].text = str(result_data[param])
+                        row_cells[2].text = get_normal_values(param)
+            else:
+                doc.add_paragraph('Нет данных о результатах анализа.')
+                
+        except json.JSONDecodeError:
+            # Если не удалось разобрать JSON, добавляем текст результата как есть
+            doc.add_paragraph(f'Результат: {result["result_data"]}')
         
-        # Добавляем разделитель между результатами
-        if i < len(results):
-            doc.add_paragraph('_' * 50)
+        # Добавляем информацию о лаборанте
+        lab_tech = doc.add_paragraph()
+        lab_tech.add_run('Лаборант: ').bold = True
+        lab_tech.add_run(f'{result["lab_technician"]}')
     
     # Выбор места сохранения файла
-    date_str = datetime.now().strftime("%Y%m%d_%H%M")
-    default_filename = f'Отчет_по_анализам_{date_str}.docx'
-    
     file_path, _ = QFileDialog.getSaveFileName(
         parent_widget,
         "Сохранить отчет",
-        default_filename,
+        f'Отчет_по_анализам_{datetime.now().strftime("%Y%m%d_%H%M")}.docx',
         "Word Documents (*.docx)"
     )
     
@@ -260,6 +309,16 @@ def export_all_analyses_to_word(parent_widget, filters=None):
             QMessageBox.critical(parent_widget, "Ошибка", f"Не удалось сохранить файл: {str(e)}")
     
     return None
+
+def translate_status(status):
+    """Перевод статуса на русский язык"""
+    status_map = {
+        'pending': 'В обработке',
+        'completed': 'Выполнен',
+        'cancelled': 'Отменен',
+        'sent': 'Отправлен'
+    }
+    return status_map.get(status, status)
 
 def get_normal_values(parameter):
     """Получение нормальных значений для параметра анализа"""
